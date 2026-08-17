@@ -2,15 +2,15 @@
 Rack Label Generator
 =====================
 - Upload a master sheet (Excel/CSV) with columns:
-    Zone | Part No | Part Description | Storage Location | Delivery Location
+    Storage Location | Part No | Part Description | Delivery Location
 - App generates one A4-landscape-strip label per rack/bin (parsed from the
   "Storage Location" column, e.g. "A-01"), each with a QR code and an
   optional up/down arrow per level.
 - Scanning the QR code opens this same app with ?rack=<storage location> in
   the URL, which switches the app into "scan view" and shows ONLY the rows
-  belonging to that rack/bin (Zone, Part No, Part Description, Storage
-  Location, Delivery Location) — i.e. scanning the "A-01" label only ever
-  shows A-01 data, never other bins.
+  belonging to that rack/bin (Storage Location, Part No, Part Description,
+  Delivery Location) — i.e. scanning the "A-01" label only ever shows A-01
+  data, never other bins.
 
 Run locally:
     streamlit run app.py
@@ -37,10 +37,9 @@ from PIL import Image, ImageDraw, ImageFont
 # Config
 # --------------------------------------------------------------------------
 REQUIRED_COLUMNS = [
-    "Zone",
+    "Storage Location",
     "Part No",
     "Part Description",
-    "Storage Location",
     "Delivery Location",
 ]
 
