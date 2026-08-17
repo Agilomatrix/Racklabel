@@ -3131,7 +3131,7 @@ _LOGO_PNG_B64 = (
     "AABJRU5ErkJggmhQm3mOYQAA"
 )
 
-st.set_page_config(page_title="AgiloZoneLabel", page_icon="🏷️", layout="wide")
+st.set_page_config(page_title="AgiloAisleLabel", page_icon="🏷️", layout="wide")
 
 
 def mm_to_px(mm: float) -> int:
@@ -3390,7 +3390,7 @@ def render_header(subtitle: str) -> None:
         </style>
         <div class="agilo-header">
             <img src="{logo_uri}" alt="Agilomatrix logo" />
-            <div class="agilo-title">AgiloZoneLabel</div>
+            <div class="agilo-title">AgiloAisleLabel</div>
             <div class="agilo-subtitle">{subtitle}</div>
             <div class="agilo-divider"></div>
         </div>
