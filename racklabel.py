@@ -1,15 +1,16 @@
 """
-Zone Label Generator
+Rack Label Generator
 =====================
 - Upload a master sheet (Excel/CSV) with columns:
     Zone | Part No | Part Description | Storage Location | Delivery Location
-- App generates one A4-landscape-strip label per unique Zone (297mm x 210mm
-  frame as in the sample image), each with a QR code.
-- Scanning the QR code opens this same app with ?zone=<zone name> in the URL,
-  which switches the app into "scan view" and shows ONLY the rows belonging
-  to that zone (Zone, Part No, Part Description, Storage Location, Delivery
-  Location) — i.e. scanning the "MID RISE ZONE" label only ever shows MID
-  RISE ZONE data, never other zones.
+- App generates one A4-landscape-strip label per rack/bin (parsed from the
+  "Storage Location" column, e.g. "A-01"), each with a QR code and an
+  optional up/down arrow per level.
+- Scanning the QR code opens this same app with ?rack=<storage location> in
+  the URL, which switches the app into "scan view" and shows ONLY the rows
+  belonging to that rack/bin (Zone, Part No, Part Description, Storage
+  Location, Delivery Location) — i.e. scanning the "A-01" label only ever
+  shows A-01 data, never other bins.
 
 Run locally:
     streamlit run app.py
@@ -3244,70 +3245,6 @@ def _fit_multiline(draw, text, max_width, max_height, max_size=600, min_size=20)
     return best
 
 
-def generate_label(zone_name: str, qr_data: str | None) -> Image.Image:
-    """Build one zone label. If qr_data is None, the label is generated
-    WITHOUT a QR code (plain zone signage) — the zone name is blown up,
-    word-wrapped if needed, and centered to fill the whole page."""
-    W, H = mm_to_px(LABEL_WIDTH_MM), mm_to_px(LABEL_HEIGHT_MM)
-    img = Image.new("RGB", (W, H), "white")
-    draw = ImageDraw.Draw(img)
-
-    # Double border, matching the reference image
-    outer_margin = int(W * 0.015)
-    draw.rectangle(
-        [outer_margin, outer_margin, W - outer_margin, H - outer_margin],
-        outline="black",
-        width=max(2, int(W * 0.003)),
-    )
-    inner_margin = outer_margin + int(W * 0.012)
-    draw.rectangle(
-        [inner_margin, inner_margin, W - inner_margin, H - inner_margin],
-        outline="black",
-        width=max(1, int(W * 0.0015)),
-    )
-
-    text = zone_name.upper()
-    max_text_width = W - 2 * inner_margin - int(W * 0.06)
-
-    if qr_data:
-        # Smaller title near the top, QR code fills the rest below it.
-        font = fit_font(draw, text, max_text_width, int(H * 0.20))
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        draw.text(
-            ((W - text_w) / 2 - bbox[0], H * 0.12 - bbox[1]),
-            text,
-            fill="black",
-            font=font,
-        )
-
-        # QR code, centered below the title
-        qr = qrcode.QRCode(box_size=10, border=2)
-        qr.add_data(qr_data)
-        qr.make(fit=True)
-        qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        qr_size = int(H * 0.42)
-        qr_img = qr_img.resize((qr_size, qr_size))
-        img.paste(qr_img, (int((W - qr_size) / 2), int(H * 0.42)))
-    else:
-        # No QR: the zone name is the ONLY content — blow it up (wrapping
-        # onto multiple lines if needed) so it fills nearly the whole page.
-        max_text_height = H - 2 * inner_margin - int(H * 0.08)
-        font, lines, line_h = _fit_multiline(
-            draw, text, max_text_width, max_text_height, max_size=int(H * 0.9)
-        )
-        total_h = line_h * len(lines)
-        start_y = (H - total_h) / 2
-        for i, line in enumerate(lines):
-            bbox = draw.textbbox((0, 0), line, font=font)
-            line_w = bbox[2] - bbox[0]
-            x = (W - line_w) / 2 - bbox[0]
-            y = start_y + i * line_h - bbox[1]
-            draw.text((x, y), line, fill="black", font=font)
-
-    return img
-
-
 def parse_rack_code(raw) -> tuple[str, str] | None:
     """Parse a 'Storage Location' value like 'A-01' / 'A 01' / 'A01' into
     (LEVEL, NUMBER), e.g. ('A', '01'). Returns None if it doesn't match the
@@ -3466,35 +3403,10 @@ def render_footer() -> None:
 
 
 # --------------------------------------------------------------------------
-# SCAN VIEW — shown when the URL has ?zone=... or ?rack=... (QR scan)
+# SCAN VIEW — shown when the URL has ?rack=... (QR scan)
 # --------------------------------------------------------------------------
 query_params = st.query_params
-scanned_zone = query_params.get("zone")
 scanned_rack = query_params.get("rack")
-
-if scanned_zone:
-    render_header(scanned_zone.upper())
-    df = load_master()
-
-    if df is None:
-        st.error(
-            "No master sheet has been uploaded to this app yet. "
-            "Ask the admin to upload it from the main page."
-        )
-        render_footer()
-        st.stop()
-
-    filtered = df[df["Zone"].astype(str).str.strip().str.lower() == scanned_zone.strip().lower()]
-
-    if filtered.empty:
-        st.warning(f"No records found for zone: **{scanned_zone}**")
-    else:
-        st.success(f"{len(filtered)} record(s) found for **{scanned_zone}**")
-        st.dataframe(filtered[REQUIRED_COLUMNS], use_container_width=True, hide_index=True)
-
-    st.caption("This view only ever shows rows for the zone printed on the scanned label.")
-    render_footer()
-    st.stop()
 
 if scanned_rack:
     parsed = parse_rack_code(scanned_rack)
@@ -3527,26 +3439,16 @@ if scanned_rack:
 # --------------------------------------------------------------------------
 # MAIN VIEW — upload master sheet & generate labels
 # --------------------------------------------------------------------------
-render_header("LABEL GENERATOR")
+render_header("RACK LABEL GENERATOR")
 st.write(
-    "Upload the master sheet once. Choose **Zone Label** (one label per "
-    "zone) or **Rack Label** (one label per rack/bin, with an optional "
-    "up/down arrow per level) in the sidebar. Scanning a label's QR code "
-    "shows only that label's own rows — never anyone else's."
+    "Upload the master sheet once. The app generates one **Rack Label** "
+    "per rack/bin (parsed from 'Storage Location', e.g. 'A-01'), with an "
+    "optional up/down arrow per level. Scanning a label's QR code shows "
+    "only that label's own rows — never anyone else's."
 )
 
 with st.sidebar:
     st.header("Settings")
-
-    label_type = st.radio(
-        "Label type",
-        ["Zone Label", "Rack Label (per-bin, with arrows)"],
-        help="Zone Label: one label per Zone. "
-        "Rack Label: one label per rack/bin (parsed from 'Storage "
-        "Location', e.g. 'A-01'), with an optional up/down arrow per "
-        "level.",
-    )
-    st.session_state["label_type"] = label_type
 
     include_qr = st.toggle(
         "Include QR code on labels",
@@ -3567,9 +3469,8 @@ with st.sidebar:
             "Public App URL (for QR codes)",
             value=default_url,
             placeholder="https://your-app.streamlit.app",
-            help="The QR codes will link to <this URL>/?zone=<zone name> "
-            "(Zone Label) or <this URL>/?rack=<storage location> (Rack "
-            "Label). Must be the address people's phones can actually "
+            help="The QR codes will link to <this URL>/?rack=<storage "
+            "location>. Must be the address people's phones can actually "
             "reach — not 'localhost' — for scanning to work. Set this "
             "once; it's remembered for all future visits.",
         )
@@ -3628,150 +3529,102 @@ if include_qr and not app_url:
 generate_disabled = include_qr and not app_url
 
 # ==========================================================================
-# ZONE LABEL FLOW
-# ==========================================================================
-if label_type == "Zone Label":
-    zones = sorted(df["Zone"].dropna().astype(str).str.strip().unique().tolist())
-    st.write(f"**{len(zones)} zone(s) found:** {', '.join(zones)}")
-
-    selected_zones = st.multiselect(
-        "Zones to print",
-        options=zones,
-        default=zones,
-        help="Leave everything selected for a full bulk run, or trim this "
-        "down to just the one or two zones you need reprinted.",
-    )
-
-    if st.button("Generate Labels", type="primary", disabled=generate_disabled or not selected_zones):
-        zip_buffer = io.BytesIO()
-        cols = st.columns(2)
-
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, zone in enumerate(selected_zones):
-                qr_url = f"{app_url.rstrip('/')}/?zone={url_quote(zone)}" if include_qr else None
-                label_img = generate_label(zone, qr_url)
-
-                img_buffer = io.BytesIO()
-                label_img.save(img_buffer, format="PNG", dpi=(DPI, DPI))
-                safe_name = "".join(c if c.isalnum() or c in " _-" else "_" for c in zone)
-                zf.writestr(f"{safe_name}.png", img_buffer.getvalue())
-
-                with cols[i % 2]:
-                    st.image(label_img, caption=zone, use_container_width=True)
-                    img_buffer.seek(0)
-                    st.download_button(
-                        f"⬇️ Download {zone} label",
-                        data=img_buffer.getvalue(),
-                        file_name=f"{safe_name}.png",
-                        mime="image/png",
-                        key=f"dl_zone_{i}",
-                    )
-
-        st.download_button(
-            "⬇️ Download All Selected Labels (ZIP, print-ready PNGs @ 300 DPI, A4 landscape)",
-            data=zip_buffer.getvalue(),
-            file_name="zone_labels.zip",
-            mime="application/zip",
-        )
-
-# ==========================================================================
 # RACK LABEL FLOW — one label per bin (parsed from "Storage Location"),
 # with an optional up/down arrow per detected level (A, B, C, D, E, ...)
 # ==========================================================================
-else:
-    raw_locations = df["Storage Location"].dropna().astype(str).str.strip().unique().tolist()
+raw_locations = df["Storage Location"].dropna().astype(str).str.strip().unique().tolist()
 
-    parsed_racks = []  # list of (level, number, raw)
-    unparsed = []
-    for raw in raw_locations:
-        parsed = parse_rack_code(raw)
-        if parsed:
-            parsed_racks.append((parsed[0], parsed[1], raw))
-        else:
-            unparsed.append(raw)
+parsed_racks = []  # list of (level, number, raw)
+unparsed = []
+for raw in raw_locations:
+    parsed = parse_rack_code(raw)
+    if parsed:
+        parsed_racks.append((parsed[0], parsed[1], raw))
+    else:
+        unparsed.append(raw)
 
-    parsed_racks.sort(key=lambda r: (r[0], r[1]))
-    levels = sorted({level for level, _, _ in parsed_racks})
+parsed_racks.sort(key=lambda r: (r[0], r[1]))
+levels = sorted({level for level, _, _ in parsed_racks})
 
-    st.write(f"**{len(parsed_racks)} rack/bin label(s) found** across **{len(levels)} level(s)**: {', '.join(levels) or '—'}")
+st.write(f"**{len(parsed_racks)} rack/bin label(s) found** across **{len(levels)} level(s)**: {', '.join(levels) or '—'}")
 
-    if unparsed:
-        with st.expander(f"⚠️ {len(unparsed)} 'Storage Location' value(s) couldn't be parsed as a rack code", expanded=False):
-            st.write(
-                "Expected a letter (the level) followed by a number, e.g. "
-                "`A-01`, `B 02`, `C03`. These values didn't match and were "
-                "skipped:"
-            )
-            st.write(", ".join(unparsed))
-
-    if not parsed_racks:
-        st.stop()
-
-    # --- Per-level arrow configuration -----------------------------------
-    st.subheader("Level arrows")
-    st.caption(
-        "For each level detected in your data, choose whether its rack "
-        "labels should show an arrow pointing to that level, or no arrow."
-    )
-    level_arrows: dict[str, str] = st.session_state.get("level_arrows", {})
-    arrow_cols = st.columns(min(4, len(levels))) if levels else []
-    for i, level in enumerate(levels):
-        with arrow_cols[i % len(arrow_cols)]:
-            choice = st.selectbox(
-                f"Level {level}",
-                options=list(ARROW_LABEL_TO_DIRECTION.keys()),
-                index=list(ARROW_LABEL_TO_DIRECTION.values()).index(level_arrows.get(level, "none")),
-                key=f"arrow_level_{level}",
-            )
-            level_arrows[level] = ARROW_LABEL_TO_DIRECTION[choice]
-    st.session_state["level_arrows"] = level_arrows
-
-    # --- Selectable print list (full bulk run, or just 1-2 reprints) -----
-    rack_display = [f"{level} - {number}" for level, number, _ in parsed_racks]
-    selected_display = st.multiselect(
-        "Racks to print",
-        options=rack_display,
-        default=rack_display,
-        help="Leave everything selected for a full bulk run, or trim this "
-        "down to just the one or two bins you need reprinted.",
-    )
-    selected_racks = [
-        (level, number, raw)
-        for (level, number, raw), disp in zip(parsed_racks, rack_display)
-        if disp in selected_display
-    ]
-
-    if st.button("Generate Labels", type="primary", disabled=generate_disabled or not selected_racks):
-        zip_buffer = io.BytesIO()
-        cols = st.columns(2)
-
-        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-            for i, (level, number, raw) in enumerate(selected_racks):
-                qr_url = f"{app_url.rstrip('/')}/?rack={url_quote(raw)}" if include_qr else None
-                arrow_direction = level_arrows.get(level, "none")
-                label_img = generate_rack_label(level, number, qr_url, arrow_direction)
-
-                img_buffer = io.BytesIO()
-                label_img.save(img_buffer, format="PNG", dpi=(DPI, DPI))
-                safe_name = f"{level}-{number}".replace(" ", "_")
-                zf.writestr(f"{safe_name}.png", img_buffer.getvalue())
-
-                with cols[i % 2]:
-                    st.image(label_img, caption=f"{level} - {number}", use_container_width=True)
-                    img_buffer.seek(0)
-                    st.download_button(
-                        f"⬇️ Download {level}-{number} label",
-                        data=img_buffer.getvalue(),
-                        file_name=f"{safe_name}.png",
-                        mime="image/png",
-                        key=f"dl_rack_{i}",
-                    )
-
-        st.download_button(
-            "⬇️ Download All Selected Labels (ZIP, print-ready PNGs @ 300 DPI, A4 landscape)",
-            data=zip_buffer.getvalue(),
-            file_name="rack_labels.zip",
-            mime="application/zip",
+if unparsed:
+    with st.expander(f"⚠️ {len(unparsed)} 'Storage Location' value(s) couldn't be parsed as a rack code", expanded=False):
+        st.write(
+            "Expected a letter (the level) followed by a number, e.g. "
+            "`A-01`, `B 02`, `C03`. These values didn't match and were "
+            "skipped:"
         )
+        st.write(", ".join(unparsed))
+
+if not parsed_racks:
+    st.stop()
+
+# --- Per-level arrow configuration -----------------------------------
+st.subheader("Level arrows")
+st.caption(
+    "For each level detected in your data, choose whether its rack "
+    "labels should show an arrow pointing to that level, or no arrow."
+)
+level_arrows: dict[str, str] = st.session_state.get("level_arrows", {})
+arrow_cols = st.columns(min(4, len(levels))) if levels else []
+for i, level in enumerate(levels):
+    with arrow_cols[i % len(arrow_cols)]:
+        choice = st.selectbox(
+            f"Level {level}",
+            options=list(ARROW_LABEL_TO_DIRECTION.keys()),
+            index=list(ARROW_LABEL_TO_DIRECTION.values()).index(level_arrows.get(level, "none")),
+            key=f"arrow_level_{level}",
+        )
+        level_arrows[level] = ARROW_LABEL_TO_DIRECTION[choice]
+st.session_state["level_arrows"] = level_arrows
+
+# --- Selectable print list (full bulk run, or just 1-2 reprints) -----
+rack_display = [f"{level} - {number}" for level, number, _ in parsed_racks]
+selected_display = st.multiselect(
+    "Racks to print",
+    options=rack_display,
+    default=rack_display,
+    help="Leave everything selected for a full bulk run, or trim this "
+    "down to just the one or two bins you need reprinted.",
+)
+selected_racks = [
+    (level, number, raw)
+    for (level, number, raw), disp in zip(parsed_racks, rack_display)
+    if disp in selected_display
+]
+
+if st.button("Generate Labels", type="primary", disabled=generate_disabled or not selected_racks):
+    zip_buffer = io.BytesIO()
+    cols = st.columns(2)
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, (level, number, raw) in enumerate(selected_racks):
+            qr_url = f"{app_url.rstrip('/')}/?rack={url_quote(raw)}" if include_qr else None
+            arrow_direction = level_arrows.get(level, "none")
+            label_img = generate_rack_label(level, number, qr_url, arrow_direction)
+
+            img_buffer = io.BytesIO()
+            label_img.save(img_buffer, format="PNG", dpi=(DPI, DPI))
+            safe_name = f"{level}-{number}".replace(" ", "_")
+            zf.writestr(f"{safe_name}.png", img_buffer.getvalue())
+
+            with cols[i % 2]:
+                st.image(label_img, caption=f"{level} - {number}", use_container_width=True)
+                img_buffer.seek(0)
+                st.download_button(
+                    f"⬇️ Download {level}-{number} label",
+                    data=img_buffer.getvalue(),
+                    file_name=f"{safe_name}.png",
+                    mime="image/png",
+                    key=f"dl_rack_{i}",
+                )
+
+    st.download_button(
+        "⬇️ Download All Selected Labels (ZIP, print-ready PNGs @ 300 DPI, A4 landscape)",
+        data=zip_buffer.getvalue(),
+        file_name="rack_labels.zip",
+        mime="application/zip",
+    )
 
 render_footer()
