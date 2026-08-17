@@ -24,6 +24,7 @@ import gzip
 import io
 import os
 import re
+import uuid
 import zipfile
 from pathlib import Path
 from urllib.parse import quote as url_quote
@@ -3492,31 +3493,65 @@ if generate_disabled:
         "otherwise the QR codes won't be scannable from a phone."
     )
 
-quick_tab, bulk_tab = st.tabs(["✏️ Quick Print (1–2 labels)", "📋 Bulk (from Master Sheet)"])
+quick_tab, bulk_tab = st.tabs(["✏️ Quick Print", "📋 Bulk (from Master Sheet)"])
 
 with quick_tab:
-    st.caption(
-        "Type in the Storage Location (e.g. **A-01**) for one or two bins "
-        "and generate just those labels — no master sheet upload needed."
+    st.write(
+        "Add labels below by filling in the blanks — no spreadsheet to "
+        "wrangle. Each row is one rack label: type the **Storage Location** "
+        "(e.g. `A-01`) and pick its **arrow direction**. Add as many rows "
+        "as you need, or remove the ones you don't."
     )
-    qp_col1, qp_col2 = st.columns(2)
+
+    st.subheader("Labels")
+    st.caption("Fill in the blanks for each label. Add more labels or remove ones you don't need.")
+
+    if "quick_label_rows" not in st.session_state:
+        st.session_state.quick_label_rows = [str(uuid.uuid4())]
+
+    def _add_quick_row():
+        st.session_state.quick_label_rows.append(str(uuid.uuid4()))
+
+    def _remove_quick_row(row_id: str):
+        st.session_state.quick_label_rows.remove(row_id)
+        st.session_state.pop(f"quick_loc_{row_id}", None)
+        st.session_state.pop(f"quick_arrow_{row_id}", None)
+
     quick_entries = []
-    for i, col in enumerate((qp_col1, qp_col2), start=1):
-        with col:
-            st.markdown(f"**Label {i}**")
-            loc = st.text_input(
-                f"Storage Location {i}",
-                key=f"quick_loc_{i}",
-                placeholder="e.g. A-01",
-            )
-            arrow_choice = st.selectbox(
-                f"Arrow direction {i}",
-                options=list(ARROW_LABEL_TO_DIRECTION.keys()),
-                key=f"quick_arrow_{i}",
-            )
+    for row_id in list(st.session_state.quick_label_rows):
+        with st.container(border=True):
+            row_col1, row_col2, row_col3 = st.columns([3, 3, 1])
+            with row_col1:
+                loc = st.text_input(
+                    "STORAGE LOCATION",
+                    key=f"quick_loc_{row_id}",
+                    placeholder="e.g. A-01",
+                )
+            with row_col2:
+                arrow_choice = st.selectbox(
+                    "ARROW DIRECTION",
+                    options=list(ARROW_LABEL_TO_DIRECTION.keys()),
+                    key=f"quick_arrow_{row_id}",
+                )
+            with row_col3:
+                st.markdown("<div style='height: 1.85rem'></div>", unsafe_allow_html=True)
+                st.button(
+                    "✕",
+                    key=f"quick_remove_{row_id}",
+                    on_click=_remove_quick_row,
+                    args=(row_id,),
+                    disabled=len(st.session_state.quick_label_rows) <= 1,
+                    help="Remove this label",
+                )
             quick_entries.append((loc.strip(), ARROW_LABEL_TO_DIRECTION[arrow_choice]))
 
-    if st.button("Generate Quick Label(s)", type="primary", disabled=generate_disabled):
+    st.button("+ Add label", on_click=_add_quick_row)
+
+    any_filled = any(loc for loc, _ in quick_entries)
+    if not any_filled:
+        st.info("Fill in at least one label's blanks (Storage Location) to generate labels.")
+
+    if st.button("Generate Quick Label(s)", type="primary", disabled=generate_disabled or not any_filled):
         any_generated = False
         qp_result_cols = st.columns(2)
         for i, (loc, arrow_direction) in enumerate(quick_entries):
@@ -3550,7 +3585,7 @@ with quick_tab:
                 )
 
         if not any_generated:
-            st.warning("Enter at least one Storage Location above.")
+            st.warning("Enter at least one valid Storage Location above.")
 
 with bulk_tab:
     uploaded_file = st.file_uploader(
